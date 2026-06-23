@@ -24,6 +24,8 @@ Long-horizon local-model coding can run for hours, then stop because a provider 
 
 This script automates that boring part.
 
+It also avoids stacking duplicate nudges. If Pi already has a queued `continue` steering message and has not produced a successful assistant/tool response after it, the watchdog will not add another one.
+
 ## Quick Start
 
 Find your Pi launcher profile:
@@ -90,6 +92,8 @@ Those modes focus the Pi window, so use them only if console injection does not 
 -PollSeconds 10
 -QuietSeconds 8
 -MaxNudgesPerSession 20
+-MinSecondsBetweenNudges 180
+-RecentNudgeHoldSeconds 600
 -DryRun
 -CatchUp
 -Once
@@ -101,6 +105,7 @@ Those modes focus the Pi window, so use them only if console injection does not 
 - Designed for Pi session JSONL files.
 - If Pi was launched elevated, the watchdog must also run elevated. The script requests elevation automatically unless you pass `-NoElevate`.
 - Normal startup ignores failures already present in the session file. Add `-CatchUp` when you intentionally want to act on the current latest failure.
+- The watchdog is single-flight by default: it will not queue a second `continue` while one is already outstanding, and it persists a recent-nudge hold file under `logs/` so restarts do not immediately stack another nudge.
 - This does not detect whether the model is doing good work. It only keeps the session moving after common transient failures.
 
 ## License
