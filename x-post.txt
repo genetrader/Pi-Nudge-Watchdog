@@ -1,0 +1,5 @@
+I built a tiny Windows helper called Pi-Nudge-Watchdog.
+
+It watches long-running Pi local-model coding sessions and, when the model dies with the usual "terminated" / timeout / connection errors, it automatically nudges the session with "continue".
+
+Small thing. Amazingly useful.
