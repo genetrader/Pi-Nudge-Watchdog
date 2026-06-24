@@ -1,12 +1,12 @@
 param(
     [string]$ProfileRoot = "$env:USERPROFILE\.pi\agent\launcher-profiles",
-    [Parameter(Mandatory=$true)]
-    [string]$ProfileName,
+    [string]$ProfileName = "",
     [string]$WindowTitleRegex = "",
-    [string]$TriggerRegex = "terminated|Request timed out|Connection error|Retry failed after \d+ attempts|Aborted after \d+ retry attempts",
+    [string]$TriggerRegex = "Proxy error:\s*timed out|terminated|Request timed out|Connection error|Retry failed after \d+ attempts|Aborted after \d+ retry attempts",
     [string]$NudgeText = "continue",
     [int]$PollSeconds = 10,
     [int]$QuietSeconds = 8,
+    [int]$MaxProfiles = 8,
     [int]$MaxNudgesPerSession = 20,
     [int]$MinSecondsBetweenNudges = 180,
     [int]$RecentNudgeHoldSeconds = 600,
@@ -28,7 +28,7 @@ Add-Type -ErrorAction SilentlyContinue -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
-public static class PiNudgeWin32 {
+public static class PiWatchdogWin32 {
     [DllImport("user32.dll")]
     public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
@@ -49,17 +49,18 @@ if (-not $NoElevate -and -not (Test-IsAdmin)) {
         "-ExecutionPolicy", "Bypass",
         "-File", "`"$PSCommandPath`"",
         "-ProfileRoot", "`"$ProfileRoot`"",
-        "-ProfileName", "`"$ProfileName`"",
         "-WindowTitleRegex", "`"$WindowTitleRegex`"",
         "-TriggerRegex", "`"$TriggerRegex`"",
         "-NudgeText", "`"$NudgeText`"",
         "-PollSeconds", "$PollSeconds",
         "-QuietSeconds", "$QuietSeconds",
+        "-MaxProfiles", "$MaxProfiles",
         "-MaxNudgesPerSession", "$MaxNudgesPerSession",
         "-MinSecondsBetweenNudges", "$MinSecondsBetweenNudges",
         "-RecentNudgeHoldSeconds", "$RecentNudgeHoldSeconds",
         "-InputMode", "$InputMode"
     )
+    if ($ProfileName) { $argsList += @("-ProfileName", "`"$ProfileName`"") }
     if ($DryRun) { $argsList += "-DryRun" }
     if ($Once) { $argsList += "-Once" }
     if ($CatchUp) { $argsList += "-CatchUp" }
@@ -79,7 +80,8 @@ function Write-WatchLog([string]$Message) {
 }
 
 function Get-StatePath {
-    $safeProfile = ($ProfileName -replace '[^A-Za-z0-9_.-]', '_')
+    $safeProfile = (($ProfileName -replace '[^A-Za-z0-9_.-]', '_'))
+    if (-not $safeProfile) { $safeProfile = "all-profiles" }
     return Join-Path $logDir ("state-{0}.json" -f $safeProfile)
 }
 
@@ -107,35 +109,70 @@ function Set-LastPersistentNudgeAt([DateTime]$When) {
     $state | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding UTF8
 }
 
+function Get-LatestSessionFiles {
+    if ($ProfileName) {
+        $roots = @(Join-Path $ProfileRoot $ProfileName)
+    } else {
+        $roots = Get-ChildItem -LiteralPath $ProfileRoot -Directory -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First $MaxProfiles |
+            ForEach-Object { $_.FullName }
+    }
+
+    $latestFiles = @()
+    foreach ($root in $roots) {
+        $sessions = Join-Path $root "sessions"
+        if (-not (Test-Path -LiteralPath $sessions)) { continue }
+        $latest = Get-ChildItem -LiteralPath $sessions -File -Filter "*.jsonl" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($latest) { $latestFiles += $latest }
+    }
+    return @($latestFiles | Sort-Object LastWriteTime -Descending)
+}
+
 function Get-LatestSessionFile {
-    $profile = Join-Path $ProfileRoot $ProfileName
-    $sessions = Join-Path $profile "sessions"
-    if (-not (Test-Path -LiteralPath $sessions)) { return $null }
-    return Get-ChildItem -LiteralPath $sessions -File -Filter "*.jsonl" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
+    return @(Get-LatestSessionFiles | Select-Object -First 1)[0]
+}
+
+function Get-MessageText($Message) {
+    if (-not $Message) { return "" }
+    $texts = @()
+    foreach ($part in @($Message.content)) {
+        if ($part -is [string]) {
+            $texts += $part
+        } elseif ($part -and $part.PSObject.Properties["text"]) {
+            $texts += [string]$part.text
+        }
+    }
+    return ($texts -join "`n")
 }
 
 function Get-RecentFailureKey([System.IO.FileInfo]$SessionFile) {
-    $lines = Get-Content -LiteralPath $SessionFile.FullName -Tail 60 -ErrorAction SilentlyContinue
+    $lines = Get-Content -LiteralPath $SessionFile.FullName -Tail 40 -ErrorAction SilentlyContinue
     [Array]::Reverse($lines)
 
     foreach ($line in $lines) {
-        if ($line -notmatch $TriggerRegex) { continue }
-        try {
-            $obj = $line | ConvertFrom-Json -ErrorAction Stop
-            $msg = $obj.message
-            $err = [string]$msg.errorMessage
-            $stop = [string]$msg.stopReason
-            $role = [string]$msg.role
-            $stamp = [string]$obj.timestamp
-            if (($role -eq "assistant" -or $msg) -and ($stop -match "error|aborted" -or $err)) {
-                if ($err -match $TriggerRegex -or $line -match $TriggerRegex) {
-                    return "{0}|{1}|{2}|{3}" -f $SessionFile.FullName, $obj.id, $stamp, $err
+        if ($line -match $TriggerRegex) {
+            try {
+                $obj = $line | ConvertFrom-Json -ErrorAction Stop
+                $msg = $obj.message
+                $err = [string]$msg.errorMessage
+                $stop = [string]$msg.stopReason
+                $role = [string]$msg.role
+                $stamp = [string]$obj.timestamp
+                $text = Get-MessageText -Message $msg
+                if ($role -eq "assistant" -and $text -match $TriggerRegex) {
+                    return "{0}|{1}|{2}|{3}" -f $SessionFile.FullName, $obj.id, $stamp, ($Matches[0])
                 }
+                if (($role -eq "assistant" -or $msg) -and ($stop -match "error|aborted" -or $err)) {
+                    if ($err -match $TriggerRegex) {
+                        return "{0}|{1}|{2}|{3}" -f $SessionFile.FullName, $obj.id, $stamp, $err
+                    }
+                }
+            } catch {
+                return "{0}|raw|{1}|{2}" -f $SessionFile.FullName, $SessionFile.LastWriteTimeUtc.Ticks, ($line.Substring(0, [Math]::Min(120, $line.Length)))
             }
-        } catch {
-            return "{0}|raw|{1}|{2}" -f $SessionFile.FullName, $SessionFile.LastWriteTimeUtc.Ticks, ($line.Substring(0, [Math]::Min(160, $line.Length)))
         }
     }
     return $null
@@ -161,8 +198,7 @@ function Test-HasOutstandingNudge([System.IO.FileInfo]$SessionFile) {
                         $texts += [string]$part.text
                     }
                 }
-                $body = ($texts -join "`n").Trim()
-                if ($body -eq $NudgeText) {
+                if ((($texts -join "`n").Trim()) -eq $NudgeText) {
                     $hasUnconsumedNudge = $true
                 }
                 continue
@@ -210,19 +246,18 @@ function Send-NudgeToPi {
     }
 
     if (-not (Test-IsAdmin)) {
-        Write-WatchLog "Refusing to send input from non-elevated watchdog. Relaunch elevated when Pi is elevated."
+            Write-WatchLog "Refusing to send input from non-elevated watchdog. Relaunch elevated so Windows allows input into elevated Pi."
         return $false
     }
 
     if ($InputMode -eq "Console") {
         $helper = Join-Path $PSScriptRoot "pi-console-input-helper.ps1"
-        $text = $NudgeText + "`r"
         $proc = Start-Process powershell.exe -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
             "-NoProfile",
             "-ExecutionPolicy", "Bypass",
             "-File", "`"$helper`"",
             "-TargetPid", "$($target.Id)",
-            "-Text", "`"$text`""
+            "-Text", "`"$NudgeText`r`""
         )
         if ($proc.ExitCode -ne 0) {
             Write-WatchLog "Console input helper failed with exit code $($proc.ExitCode) for PID=$($target.Id)."
@@ -232,9 +267,9 @@ function Send-NudgeToPi {
         return $true
     }
 
-    [PiNudgeWin32]::ShowWindowAsync($target.MainWindowHandle, 9) | Out-Null
+    [PiWatchdogWin32]::ShowWindowAsync($target.MainWindowHandle, 9) | Out-Null
     Start-Sleep -Milliseconds 350
-    $activated = [PiNudgeWin32]::SetForegroundWindow($target.MainWindowHandle)
+    $activated = [PiWatchdogWin32]::SetForegroundWindow($target.MainWindowHandle)
     Start-Sleep -Milliseconds 350
 
     $shell = New-Object -ComObject WScript.Shell
@@ -262,7 +297,9 @@ function Send-NudgeToPi {
         Start-Sleep -Milliseconds 150
         $shell.SendKeys("{ENTER}")
         Start-Sleep -Milliseconds 150
-        if ($hadClipboard) { Set-Clipboard -Value $previousClipboard }
+        if ($hadClipboard) {
+            Set-Clipboard -Value $previousClipboard
+        }
     } else {
         $shell.SendKeys($NudgeText + "{ENTER}")
     }
@@ -274,11 +311,10 @@ $handled = @{}
 $nudgeCounts = @{}
 $lastNudgeAt = Get-LastPersistentNudgeAt
 
-Write-WatchLog "Pi-Nudge-Watchdog started. ProfileName='$ProfileName' WindowTitleRegex='$WindowTitleRegex' PollSeconds=$PollSeconds DryRun=$DryRun Once=$Once CatchUp=$CatchUp Elevated=$(Test-IsAdmin) InputMode=$InputMode MinSecondsBetweenNudges=$MinSecondsBetweenNudges RecentNudgeHoldSeconds=$RecentNudgeHoldSeconds"
+Write-WatchLog "Pi-Nudge-Watchdog started. ProfileRoot='$ProfileRoot' ProfileName='$ProfileName' WindowTitleRegex='$WindowTitleRegex' PollSeconds=$PollSeconds DryRun=$DryRun Once=$Once CatchUp=$CatchUp Elevated=$(Test-IsAdmin) InputMode=$InputMode MaxProfiles=$MaxProfiles MinSecondsBetweenNudges=$MinSecondsBetweenNudges RecentNudgeHoldSeconds=$RecentNudgeHoldSeconds"
 
 if (-not $CatchUp) {
-    $startupSession = Get-LatestSessionFile
-    if ($startupSession) {
+    foreach ($startupSession in @(Get-LatestSessionFiles)) {
         $startupKey = Get-RecentFailureKey -SessionFile $startupSession
         if ($startupKey) {
             $handled[$startupKey] = $true
@@ -289,37 +325,42 @@ if (-not $CatchUp) {
 
 while ($true) {
     try {
-        $session = Get-LatestSessionFile
-        if (-not $session) {
+        $sessions = @(Get-LatestSessionFiles)
+        if (-not $sessions -or $sessions.Count -eq 0) {
             Write-WatchLog "No Pi session file found yet."
+            if ($Once) { break }
             Start-Sleep -Seconds $PollSeconds
             continue
         }
 
-        $key = Get-RecentFailureKey -SessionFile $session
-        if ($key -and -not $handled.ContainsKey($key)) {
-            $sessionKey = $session.FullName
-            if (-not $nudgeCounts.ContainsKey($sessionKey)) { $nudgeCounts[$sessionKey] = 0 }
+        foreach ($session in $sessions) {
+            $key = Get-RecentFailureKey -SessionFile $session
+            if ($key -and -not $handled.ContainsKey($key)) {
+                $sessionKey = $session.FullName
+                if (-not $nudgeCounts.ContainsKey($sessionKey)) { $nudgeCounts[$sessionKey] = 0 }
 
-            if (Test-HasOutstandingNudge -SessionFile $session) {
-                Write-WatchLog "Outstanding '$NudgeText' already exists in Pi session; not queueing another nudge."
-                $handled[$key] = $true
-            } elseif ($lastNudgeAt -and ((Get-Date) - $lastNudgeAt).TotalSeconds -lt $RecentNudgeHoldSeconds) {
-                $remaining = [Math]::Ceiling($RecentNudgeHoldSeconds - ((Get-Date) - $lastNudgeAt).TotalSeconds)
-                Write-WatchLog "Recent nudge hold active ($remaining seconds remaining); not queueing another nudge."
-                $handled[$key] = $true
-            } elseif ($nudgeCounts[$sessionKey] -ge $MaxNudgesPerSession) {
-                Write-WatchLog "Max nudges reached for '$sessionKey'. Not sending more."
-                $handled[$key] = $true
-            } else {
-                Write-WatchLog "Detected recoverable Pi failure in '$($session.Name)': $key"
-                Start-Sleep -Seconds $QuietSeconds
-                if (Send-NudgeToPi) {
-                    $lastNudgeAt = Get-Date
-                    Set-LastPersistentNudgeAt -When $lastNudgeAt
-                    $nudgeCounts[$sessionKey]++
+                if (Test-HasOutstandingNudge -SessionFile $session) {
+                    Write-WatchLog "Outstanding '$NudgeText' already exists in Pi session; not queueing another nudge."
                     $handled[$key] = $true
-                    Write-WatchLog "Nudge count for this session: $($nudgeCounts[$sessionKey])/$MaxNudgesPerSession"
+                } elseif ($lastNudgeAt -and ((Get-Date) - $lastNudgeAt).TotalSeconds -lt $RecentNudgeHoldSeconds) {
+                    $remaining = [Math]::Ceiling($RecentNudgeHoldSeconds - ((Get-Date) - $lastNudgeAt).TotalSeconds)
+                    Write-WatchLog "Recent nudge hold active ($remaining seconds remaining); not queueing another nudge."
+                    $handled[$key] = $true
+                } elseif ($nudgeCounts[$sessionKey] -ge $MaxNudgesPerSession) {
+                    Write-WatchLog "Max nudges reached for '$sessionKey'. Not sending more."
+                    $handled[$key] = $true
+                } else {
+                    Write-WatchLog "Detected recoverable Pi failure in '$($session.Name)': $key"
+                    Start-Sleep -Seconds $QuietSeconds
+                    if (Send-NudgeToPi) {
+                        if (-not $DryRun) {
+                            $lastNudgeAt = Get-Date
+                            Set-LastPersistentNudgeAt -When $lastNudgeAt
+                            $nudgeCounts[$sessionKey]++
+                        }
+                        $handled[$key] = $true
+                        Write-WatchLog "Nudge count for this session: $($nudgeCounts[$sessionKey])/$MaxNudgesPerSession"
+                    }
                 }
             }
         }
