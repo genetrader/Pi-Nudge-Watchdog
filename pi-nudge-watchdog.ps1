@@ -9,7 +9,7 @@ param(
     [int]$MaxProfiles = 8,
     [int]$MaxNudgesPerSession = 20,
     [int]$MinSecondsBetweenNudges = 180,
-    [int]$RecentNudgeHoldSeconds = 600,
+    [int]$RecentNudgeHoldSeconds = 45,
     [ValidateSet("Console", "Paste", "Type")]
     [string]$InputMode = "Console",
     [switch]$DryRun,
