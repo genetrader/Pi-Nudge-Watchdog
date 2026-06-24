@@ -2,7 +2,7 @@ param(
     [string]$ProfileRoot = "$env:USERPROFILE\.pi\agent\launcher-profiles",
     [string]$ProfileName = "",
     [string]$WindowTitleRegex = "",
-    [string]$TriggerRegex = "Proxy error:\s*timed out|terminated|Request timed out|Connection error|Retry failed after \d+ attempts|Aborted after \d+ retry attempts",
+    [string]$TriggerRegex = "Proxy error:\s*(?:timed out|<urlopen error \[WinError 10060\]|.*WinError 10060.*)|terminated|Request timed out|Connection error|Retry failed after \d+ attempts|Aborted after \d+ retry attempts",
     [string]$NudgeText = "continue",
     [int]$PollSeconds = 10,
     [int]$QuietSeconds = 8,

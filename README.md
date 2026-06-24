@@ -7,6 +7,7 @@ When a local open-source model stalls with errors like:
 - `terminated`
 - `Request timed out`
 - `Connection error`
+- `Proxy error: <urlopen error [WinError 10060] ...>`
 - `Retry failed after 3 attempts`
 - `Aborted after 2 retry attempts`
 
