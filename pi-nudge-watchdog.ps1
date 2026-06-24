@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $WindowTitleRegex) {
-    $WindowTitleRegex = [regex]::Escape([string][char]0x03C0)
+    $WindowTitleRegex = "^(?:pi -|$([regex]::Escape([string][char]0x03C0)))"
 }
 
 Add-Type -ErrorAction SilentlyContinue -TypeDefinition @"
@@ -135,6 +135,14 @@ function Get-LatestSessionFile {
     return @(Get-LatestSessionFiles | Select-Object -First 1)[0]
 }
 
+function Get-SessionProfileName([System.IO.FileInfo]$SessionFile) {
+    try {
+        return (Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $SessionFile.FullName)))
+    } catch {
+        return ""
+    }
+}
+
 function Get-MessageText($Message) {
     if (-not $Message) { return "" }
     $texts = @()
@@ -228,18 +236,27 @@ function Test-HasOutstandingNudge([System.IO.FileInfo]$SessionFile) {
     return $hasUnconsumedNudge
 }
 
-function Send-NudgeToPi {
+function Send-NudgeToPi([string]$TargetProfileName = "") {
     $candidates = Get-Process -ErrorAction SilentlyContinue |
         Where-Object {
             $_.MainWindowTitle -and
             ($_.ProcessName -match "cmd|WindowsTerminal|powershell|pwsh") -and
             ($_.MainWindowTitle -match $WindowTitleRegex)
         } |
-        Sort-Object @{Expression={ if ($_.MainWindowTitle -match ("^" + [regex]::Escape([string][char]0x03C0))) { 0 } else { 1 } }}, StartTime -Descending
+        Sort-Object @{Expression={
+            if ($TargetProfileName -and $_.MainWindowTitle -like "*$TargetProfileName*") { 0 }
+            elseif ($_.MainWindowTitle -match "^pi -") { 1 }
+            elseif ($_.MainWindowTitle -match ("^" + [regex]::Escape([string][char]0x03C0))) { 2 }
+            else { 3 }
+        }}, StartTime -Descending
 
     $target = $candidates | Select-Object -First 1
     if (-not $target) {
         Write-WatchLog "No Pi-like window matched WindowTitleRegex='$WindowTitleRegex'."
+        return $false
+    }
+    if ($TargetProfileName -and $target.MainWindowTitle -notlike "*$TargetProfileName*") {
+        Write-WatchLog "No exact Pi window title match for profile '$TargetProfileName'. Best fallback is PID=$($target.Id) title='$($target.MainWindowTitle)'; refusing to avoid nudging the wrong CLI."
         return $false
     }
 
@@ -355,7 +372,8 @@ while ($true) {
                 } else {
                     Write-WatchLog "Detected recoverable Pi failure in '$($session.Name)': $key"
                     Start-Sleep -Seconds $QuietSeconds
-                    if (Send-NudgeToPi) {
+                    $targetProfile = Get-SessionProfileName -SessionFile $session
+                    if (Send-NudgeToPi -TargetProfileName $targetProfile) {
                         if (-not $DryRun) {
                             $lastNudgeAt = Get-Date
                             Set-LastPersistentNudgeAt -When $lastNudgeAt

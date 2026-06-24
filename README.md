@@ -80,6 +80,14 @@ By default, Pi-Nudge-Watchdog uses:
 
 That writes directly to the Pi console input buffer without focusing the Pi window. This helps avoid stealing your keyboard focus while you are typing somewhere else.
 
+For reliable multi-model use, launch Pi windows with unique titles that include the launcher profile name, for example:
+
+```bat
+title pi - qwen-local-192-168-1-127-8000-deepseek-v4-flash
+```
+
+When the watchdog is monitoring multiple profiles, it refuses to nudge a generic Pi window unless the window title matches the failed session profile. This avoids sending `continue` to the wrong local-model CLI.
+
 Fallback modes:
 
 ```powershell
