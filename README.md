@@ -10,6 +10,7 @@ When a local open-source model stalls with errors like:
 - `Proxy error: <urlopen error [WinError 10060] ...>`
 - `Retry failed after 3 attempts`
 - `Aborted after 2 retry attempts`
+- `stopReason: length` / max-output truncation
 
 Pi-Nudge-Watchdog watches Pi's session JSONL file and nudges the running Pi console with:
 

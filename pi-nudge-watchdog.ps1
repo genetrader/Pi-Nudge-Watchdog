@@ -2,7 +2,7 @@ param(
     [string]$ProfileRoot = "$env:USERPROFILE\.pi\agent\launcher-profiles",
     [string]$ProfileName = "",
     [string]$WindowTitleRegex = "",
-    [string]$TriggerRegex = "Proxy error:\s*(?:timed out|<urlopen error \[WinError 10060\]|.*WinError 10060.*)|terminated|Request timed out|Connection error|Retry failed after \d+ attempts|Aborted after \d+ retry attempts",
+    [string]$TriggerRegex = "Proxy error:\s*(?:timed out|<urlopen error \[WinError 10060\]|.*WinError 10060.*)|terminated|Request timed out|Connection error|Retry failed after \d+ attempts|Aborted after \d+ retry attempts|`"stopReason`"\s*:\s*`"length`"",
     [string]$NudgeText = "continue",
     [int]$PollSeconds = 10,
     [int]$QuietSeconds = 8,
@@ -164,6 +164,9 @@ function Get-RecentFailureKey([System.IO.FileInfo]$SessionFile) {
                 $text = Get-MessageText -Message $msg
                 if ($role -eq "assistant" -and $text -match $TriggerRegex) {
                     return "{0}|{1}|{2}|{3}" -f $SessionFile.FullName, $obj.id, $stamp, ($Matches[0])
+                }
+                if ($role -eq "assistant" -and $stop -eq "length") {
+                    return "{0}|{1}|{2}|{3}" -f $SessionFile.FullName, $obj.id, $stamp, "stopReason: length"
                 }
                 if (($role -eq "assistant" -or $msg) -and ($stop -match "error|aborted" -or $err)) {
                     if ($err -match $TriggerRegex) {
