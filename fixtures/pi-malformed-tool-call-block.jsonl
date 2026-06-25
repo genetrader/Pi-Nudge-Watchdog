@@ -1,0 +1,2 @@
+{"type":"message","id":"u1","timestamp":"2026-06-24T20:00:00Z","message":{"role":"user","content":[{"type":"text","text":"continue"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-06-24T20:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Blocked a malformed local-model tool call before the harness executed it. Retry with one smaller, valid tool call only. Details: unsupported tool write"}],"stopReason":"stop"}}

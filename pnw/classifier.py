@@ -24,6 +24,13 @@ RECOVERABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+HARNESS_BLOCK_RE = re.compile(
+    r"Blocked a malformed local-model tool call"
+    r"|Retry with one smaller, valid tool call only"
+    r"|unsupported tool \w+",
+    re.IGNORECASE,
+)
+
 CONTEXT_RE = re.compile(
     r"context overflow"
     r"|exceeds the available context size"
@@ -101,6 +108,14 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
                 "Assistant stopped due to output length; continue is safe.",
                 event,
             )
+        if HARNESS_BLOCK_RE.search(text):
+            latest_failure = event
+            return Decision(
+                "malformed_tool_call_blocked",
+                True,
+                "Harness blocked a malformed local-model tool call; retry nudge is safe.",
+                event,
+            )
         if RECOVERABLE_RE.search(text):
             latest_failure = event
             break
@@ -172,7 +187,7 @@ def _latest_assistant_completed(events: list[Event]) -> bool:
             return False
         if event.role == "assistant":
             text = _event_text(event)
-            if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text):
+            if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text) or HARNESS_BLOCK_RE.search(text):
                 return False
             if event.stop_reason.lower() in {"length", "error", "aborted"}:
                 return False
@@ -203,7 +218,12 @@ def _latest_meaningful_event(events: list[Event], role: str) -> Event | None:
 def _is_error_echo_user(event: Event) -> bool:
     if event.role != "user":
         return False
-    return bool(RECOVERABLE_RE.search(_event_text(event)) or CONTEXT_RE.search(_event_text(event)))
+    text = _event_text(event)
+    return bool(
+        RECOVERABLE_RE.search(text)
+        or CONTEXT_RE.search(text)
+        or HARNESS_BLOCK_RE.search(text)
+    )
 
 
 def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | None:
@@ -249,6 +269,6 @@ def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | No
 
 def _is_failure_event(event: Event) -> bool:
     text = _event_text(event)
-    if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text):
+    if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text) or HARNESS_BLOCK_RE.search(text):
         return True
     return event.stop_reason.lower() in {"length", "error", "aborted"}

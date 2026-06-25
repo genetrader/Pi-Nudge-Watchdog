@@ -3,6 +3,9 @@ import sys
 import unittest
 from pathlib import Path
 
+from pnw.classifier import Decision
+from pnw.cli import _nudge_text_for_decision
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WATCHDOG = ROOT / "watchdog.py"
@@ -66,6 +69,17 @@ class FixtureClassifierTests(unittest.TestCase):
 
     def test_winerror_echo_fragments_do_not_clear_failure(self):
         self.run_fixture("pi-winerror-echo-fragments.jsonl", "pi", "recoverable_provider_failure", True)
+
+    def test_malformed_tool_call_block_allows_nudge(self):
+        self.run_fixture("pi-malformed-tool-call-block.jsonl", "pi", "malformed_tool_call_blocked", True)
+
+    def test_malformed_tool_call_block_uses_specific_nudge(self):
+        decision = Decision("malformed_tool_call_blocked", True, "test")
+        self.assertIn("supported tools", _nudge_text_for_decision(decision, "continue"))
+
+    def test_custom_nudge_text_is_preserved(self):
+        decision = Decision("malformed_tool_call_blocked", True, "test")
+        self.assertEqual("keep going", _nudge_text_for_decision(decision, "keep going"))
 
 
 if __name__ == "__main__":

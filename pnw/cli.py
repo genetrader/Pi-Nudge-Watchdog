@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from .adapters import HarnessAdapter, make_adapters
-from .classifier import classify
+from .classifier import Decision, classify
 from .state import WatchState
 from .windows import list_console_windows, resolve_target_pid, send_console_nudge
 
@@ -221,7 +221,7 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
                     result = send_and_confirm(
                         session=session,
                         target_pid=target_pid,
-                        text=args.nudge_text,
+                        text=_nudge_text_for_decision(decision, args.nudge_text),
                         helper_path=args.helper_path,
                         dry_run=args.dry_run,
                         input_mode=args.input_mode,
@@ -286,6 +286,14 @@ def send_and_confirm(
         attempts.append(f"{result.summary} but Pi session did not record new input within {confirm_seconds}s")
 
     return type(result)(False, "Input delivery failed: " + " | ".join(attempts))
+
+
+def _nudge_text_for_decision(decision: Decision, configured_text: str) -> str:
+    if configured_text != "continue":
+        return configured_text
+    if decision.kind == "malformed_tool_call_blocked":
+        return "continue - retry with one smaller valid tool call only; use supported tools only"
+    return configured_text
 
 
 def cmd_test_fixture(args: argparse.Namespace) -> int:
