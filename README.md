@@ -88,6 +88,14 @@ title pi - qwen-local-192-168-1-127-8000-deepseek-v4-flash
 
 When the watchdog is monitoring multiple profiles, it refuses to nudge a generic Pi window unless the window title matches the failed session profile. This avoids sending `continue` to the wrong local-model CLI.
 
+For an already-open old Pi window with a generic title, you can explicitly pin a watcher to that console PID:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\pi-nudge-watchdog.ps1 `
+  -ProfileName "your-pi-profile-name" `
+  -TargetPid 12345
+```
+
 Fallback modes:
 
 ```powershell

@@ -10,6 +10,7 @@ param(
     [int]$MaxNudgesPerSession = 20,
     [int]$MinSecondsBetweenNudges = 180,
     [int]$RecentNudgeHoldSeconds = 45,
+    [int]$TargetPid = 0,
     [ValidateSet("Console", "Paste", "Type")]
     [string]$InputMode = "Console",
     [switch]$DryRun,
@@ -58,6 +59,7 @@ if (-not $NoElevate -and -not (Test-IsAdmin)) {
         "-MaxNudgesPerSession", "$MaxNudgesPerSession",
         "-MinSecondsBetweenNudges", "$MinSecondsBetweenNudges",
         "-RecentNudgeHoldSeconds", "$RecentNudgeHoldSeconds",
+        "-TargetPid", "$TargetPid",
         "-InputMode", "$InputMode"
     )
     if ($ProfileName) { $argsList += @("-ProfileName", "`"$ProfileName`"") }
@@ -237,25 +239,33 @@ function Test-HasOutstandingNudge([System.IO.FileInfo]$SessionFile) {
 }
 
 function Send-NudgeToPi([string]$TargetProfileName = "") {
-    $candidates = Get-Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.MainWindowTitle -and
-            ($_.ProcessName -match "cmd|WindowsTerminal|powershell|pwsh") -and
-            ($_.MainWindowTitle -match $WindowTitleRegex)
-        } |
-        Sort-Object @{Expression={
-            if ($TargetProfileName -and $_.MainWindowTitle -like "*$TargetProfileName*") { 0 }
-            elseif ($_.MainWindowTitle -match "^pi -") { 1 }
-            elseif ($_.MainWindowTitle -match ("^" + [regex]::Escape([string][char]0x03C0))) { 2 }
-            else { 3 }
-        }}, StartTime -Descending
+    if ($TargetPid -gt 0) {
+        $target = Get-Process -Id $TargetPid -ErrorAction SilentlyContinue
+        if (-not $target -or -not $target.MainWindowHandle) {
+            Write-WatchLog "TargetPid=$TargetPid was not found or has no main window."
+            return $false
+        }
+    } else {
+        $candidates = Get-Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.MainWindowTitle -and
+                ($_.ProcessName -match "cmd|WindowsTerminal|powershell|pwsh") -and
+                ($_.MainWindowTitle -match $WindowTitleRegex)
+            } |
+            Sort-Object @{Expression={
+                if ($TargetProfileName -and $_.MainWindowTitle -like "*$TargetProfileName*") { 0 }
+                elseif ($_.MainWindowTitle -match "^pi -") { 1 }
+                elseif ($_.MainWindowTitle -match ("^" + [regex]::Escape([string][char]0x03C0))) { 2 }
+                else { 3 }
+            }}, StartTime -Descending
 
-    $target = $candidates | Select-Object -First 1
+        $target = $candidates | Select-Object -First 1
+    }
     if (-not $target) {
         Write-WatchLog "No Pi-like window matched WindowTitleRegex='$WindowTitleRegex'."
         return $false
     }
-    if ($TargetProfileName -and $target.MainWindowTitle -notlike "*$TargetProfileName*") {
+    if ($TargetPid -le 0 -and $TargetProfileName -and $target.MainWindowTitle -notlike "*$TargetProfileName*") {
         Write-WatchLog "No exact Pi window title match for profile '$TargetProfileName'. Best fallback is PID=$($target.Id) title='$($target.MainWindowTitle)'; refusing to avoid nudging the wrong CLI."
         return $false
     }
@@ -331,7 +341,7 @@ $handled = @{}
 $nudgeCounts = @{}
 $lastNudgeAt = Get-LastPersistentNudgeAt
 
-Write-WatchLog "Pi-Nudge-Watchdog started. ProfileRoot='$ProfileRoot' ProfileName='$ProfileName' WindowTitleRegex='$WindowTitleRegex' PollSeconds=$PollSeconds DryRun=$DryRun Once=$Once CatchUp=$CatchUp Elevated=$(Test-IsAdmin) InputMode=$InputMode MaxProfiles=$MaxProfiles MinSecondsBetweenNudges=$MinSecondsBetweenNudges RecentNudgeHoldSeconds=$RecentNudgeHoldSeconds"
+Write-WatchLog "Pi-Nudge-Watchdog started. ProfileRoot='$ProfileRoot' ProfileName='$ProfileName' WindowTitleRegex='$WindowTitleRegex' TargetPid=$TargetPid PollSeconds=$PollSeconds DryRun=$DryRun Once=$Once CatchUp=$CatchUp Elevated=$(Test-IsAdmin) InputMode=$InputMode MaxProfiles=$MaxProfiles MinSecondsBetweenNudges=$MinSecondsBetweenNudges RecentNudgeHoldSeconds=$RecentNudgeHoldSeconds"
 
 if (-not $CatchUp) {
     foreach ($startupSession in @(Get-LatestSessionFiles)) {
