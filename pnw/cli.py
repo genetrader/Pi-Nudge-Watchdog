@@ -15,6 +15,11 @@ from .windows import list_console_windows, resolve_target_pid, send_console_nudg
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = REPO_ROOT / "logs" / "v2-state.json"
 DEFAULT_HELPER = REPO_ROOT / "pi-console-input-helper.ps1"
+DEFAULT_NUDGE_TEXT = "continue"
+LOOP_GUARD_NUDGE = (
+    "stay on the current task; if the same tool/error repeats, stop that approach "
+    "and choose another method or summarize the blocker"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--window-title-regex", default=r"^(?:pi -|p|π|OMP|OpenClaude|OpenCode)")
             p.add_argument("--allow-generic-window", action="store_true")
             p.add_argument("--input-mode", choices=["console", "type", "paste", "auto"], default="console")
-            p.add_argument("--nudge-text", default="continue")
+            p.add_argument("--nudge-text", default=DEFAULT_NUDGE_TEXT)
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
             p.add_argument("--log-path", type=Path)
@@ -289,11 +294,14 @@ def send_and_confirm(
 
 
 def _nudge_text_for_decision(decision: Decision, configured_text: str) -> str:
-    if configured_text != "continue":
+    if configured_text != DEFAULT_NUDGE_TEXT:
         return configured_text
     if decision.kind == "malformed_tool_call_blocked":
-        return "continue - retry with one smaller valid tool call only; use supported tools only"
-    return configured_text
+        return (
+            f"{DEFAULT_NUDGE_TEXT} - retry with one smaller valid supported tool call only; "
+            f"{LOOP_GUARD_NUDGE}"
+        )
+    return f"{DEFAULT_NUDGE_TEXT} - {LOOP_GUARD_NUDGE}"
 
 
 def cmd_test_fixture(args: argparse.Namespace) -> int:

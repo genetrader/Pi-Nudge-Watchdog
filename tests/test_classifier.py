@@ -75,7 +75,15 @@ class FixtureClassifierTests(unittest.TestCase):
 
     def test_malformed_tool_call_block_uses_specific_nudge(self):
         decision = Decision("malformed_tool_call_blocked", True, "test")
-        self.assertIn("supported tools", _nudge_text_for_decision(decision, "continue"))
+        text = _nudge_text_for_decision(decision, "continue")
+        self.assertIn("supported tool", text)
+        self.assertIn("same tool/error repeats", text)
+
+    def test_default_nudge_includes_loop_guard(self):
+        decision = Decision("recoverable_provider_failure", True, "test")
+        text = _nudge_text_for_decision(decision, "continue")
+        self.assertIn("stay on the current task", text)
+        self.assertIn("same tool/error repeats", text)
 
     def test_custom_nudge_text_is_preserved(self):
         decision = Decision("malformed_tool_call_blocked", True, "test")

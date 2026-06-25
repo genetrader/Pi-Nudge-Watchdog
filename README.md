@@ -12,10 +12,10 @@ When a local open-source model stalls with errors like:
 - `Aborted after 2 retry attempts`
 - `stopReason: length` / max-output truncation
 
-Pi-Nudge-Watchdog watches Pi's session JSONL file and nudges the running Pi console with:
+Pi-Nudge-Watchdog watches Pi's session JSONL file and nudges the running Pi console with a compact continue/loop-guard message:
 
 ```text
-continue
+continue - stay on the current task; if the same tool/error repeats, stop that approach and choose another method or summarize the blocker
 ```
 
 It is intentionally small. This is a liveness nudge, not a correctness critic.
@@ -24,9 +24,15 @@ It is intentionally small. This is a liveness nudge, not a correctness critic.
 
 Long-horizon local-model coding can run for hours, then stop because a provider request timed out or the model server dropped a connection. A human usually fixes that by typing `continue`.
 
-This script automates that boring part.
+This script automates that boring part. The default nudge also carries a tiny loop guard so the model is less likely to keep retrying the same broken tool call or command shape.
 
 It also avoids stacking duplicate nudges. If Pi already has a queued `continue` steering message and has not produced a successful assistant/tool response after it, the watchdog will not add another one.
+
+For malformed local-model tool calls such as `unsupported tool write`, v2 uses a stricter adaptive nudge:
+
+```text
+continue - retry with one smaller valid supported tool call only; stay on the current task; if the same tool/error repeats, stop that approach and choose another method or summarize the blocker
+```
 
 ## Quick Start
 
@@ -148,6 +154,8 @@ V2 adds:
 - A normalized event model instead of Pi-only JSONL assumptions.
 - Context-aware classification so compaction/context failures are not blindly
   nudged.
+- Adaptive loop-guard nudges, including a stricter prompt for malformed local
+  tool calls.
 - `doctor`, `status`, `list-sessions`, `once`, `watch`, and fixture test modes.
 - Exact target binding. V2 refuses generic console windows unless you supply an
   explicit `--target-pid` or opt into generic targeting.
