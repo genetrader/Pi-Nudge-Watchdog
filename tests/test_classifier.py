@@ -43,8 +43,14 @@ class FixtureClassifierTests(unittest.TestCase):
     def test_pi_queued_continue_blocks_duplicate(self):
         self.run_fixture("pi-queued-continue.jsonl", "pi", "queued_nudge_exists", False)
 
+    def test_pi_queued_loop_guard_nudge_blocks_duplicate(self):
+        self.run_fixture("pi-queued-loop-guard-nudge.jsonl", "pi", "queued_nudge_exists", False)
+
     def test_pi_compaction_failure_blocks_blind_continue(self):
         self.run_fixture("pi-compaction-failure.jsonl", "pi", "context_or_compaction_failure", False)
+
+    def test_python_syntax_error_does_not_nudge(self):
+        self.run_fixture("pi-python-syntax-error.jsonl", "pi", "tool_or_code_error", False)
 
     def test_omp_timeout_allows_nudge(self):
         self.run_fixture("omp-timeout.jsonl", "omp", "recoverable_provider_failure", True)

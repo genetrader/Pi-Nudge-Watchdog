@@ -234,7 +234,7 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
                     )
                     row["action"] = result.summary
                     state.last_nudge_at = time.time()
-                    if result.ok and not args.dry_run:
+                    if not args.dry_run:
                         state.handled.add(key)
             else:
                 row["action"] = "none"
@@ -243,6 +243,7 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
                     "max_output_truncation",
                     "recoverable_provider_failure",
                     "queued_nudge_exists",
+                    "tool_or_code_error",
                 }:
                     state.handled.add(key)
             rows.append(row)

@@ -1,0 +1,2 @@
+{"type":"message","id":"a1","timestamp":"2026-06-25T20:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Proxy error: timed out"}],"stopReason":"error"}}
+{"type":"message","id":"u2","parentId":"a1","timestamp":"2026-06-25T20:00:10Z","message":{"role":"user","content":[{"type":"text","text":"continue - stay on the current task; if the same tool/error repeats, stop that approach and choose another method or summarize the blocker"}]}}

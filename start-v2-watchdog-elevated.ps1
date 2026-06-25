@@ -9,7 +9,7 @@ param(
     [int]$RecentNudgeHoldSeconds = 45,
     [int]$ConfirmSessionWriteSeconds = 5,
     [ValidateSet("console", "type", "paste", "auto")]
-    [string]$InputMode = "auto",
+    [string]$InputMode = "console",
     [switch]$CatchUp,
     [switch]$Once,
     [switch]$DryRun

@@ -14,7 +14,7 @@ RECOVERABLE_RE = re.compile(
     r"|properly respond after a period of time"
     r"|connected host has failed to respond"
     r"|Operation aborted"
-    r"|terminated"
+    r"|\bterminated\b"
     r"|Request timed out"
     r"|Connection error"
     r"|Could not connect"
@@ -22,6 +22,15 @@ RECOVERABLE_RE = re.compile(
     r"|Aborted after \d+ retry attempts"
     r"|api_error",
     re.IGNORECASE,
+)
+
+NON_RECOVERABLE_TOOL_ERROR_RE = re.compile(
+    r"SyntaxError"
+    r"|unterminated string literal"
+    r"|unexpected EOF"
+    r"|here-document .*delimited by end-of-file"
+    r"|Command exited with code \d+",
+    re.IGNORECASE | re.DOTALL,
 )
 
 HARNESS_BLOCK_RE = re.compile(
@@ -70,7 +79,7 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
         not latest_assistant
         or events.index(latest_user) > events.index(latest_assistant)
     ):
-        if latest_user.text.strip().lower() not in {"continue", "steering: continue"}:
+        if not _is_nudge_text(latest_user.text):
             return Decision(
                 "awaiting_assistant",
                 False,
@@ -98,6 +107,13 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
                 "context_or_compaction_failure",
                 False,
                 "Context or compaction failure detected; refusing blind continue.",
+                event,
+            )
+        if NON_RECOVERABLE_TOOL_ERROR_RE.search(text):
+            return Decision(
+                "tool_or_code_error",
+                False,
+                "Tool/code error detected; refusing to auto-continue the same failure.",
                 event,
             )
         if event.stop_reason.lower() == "length":
@@ -157,10 +173,7 @@ def _event_text(event: Event) -> str:
 def _has_outstanding_continue(events: list[Event]) -> bool:
     outstanding = False
     for event in events[-160:]:
-        if event.role == "user" and event.text.strip().lower() in {
-            "continue",
-            "steering: continue",
-        }:
+        if event.role == "user" and _is_nudge_text(event.text):
             outstanding = True
             continue
         if outstanding and event.role in {"assistant", "toolResult", "tool_result"}:
@@ -169,6 +182,11 @@ def _has_outstanding_continue(events: list[Event]) -> bool:
             if event.tool_call_id or event.tool_result_for or event.text.strip():
                 outstanding = False
     return outstanding
+
+
+def _is_nudge_text(text: str) -> bool:
+    normalized = text.strip().lower()
+    return bool(re.match(r"^(?:steering:\s*)?continue(?:\s*[-:]|$)", normalized))
 
 
 def _has_active_tool_wait(events: list[Event]) -> bool:
@@ -248,7 +266,7 @@ def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | No
     for event in reversed(later):
         if event.role == "user" and _is_error_echo_user(event):
             continue
-        if event.role == "user" and event.text.strip().lower() not in {"continue", "steering: continue"}:
+        if event.role == "user" and not _is_nudge_text(event.text):
             return Decision(
                 "awaiting_assistant",
                 False,
@@ -269,6 +287,11 @@ def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | No
 
 def _is_failure_event(event: Event) -> bool:
     text = _event_text(event)
-    if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text) or HARNESS_BLOCK_RE.search(text):
+    if (
+        CONTEXT_RE.search(text)
+        or RECOVERABLE_RE.search(text)
+        or HARNESS_BLOCK_RE.search(text)
+        or NON_RECOVERABLE_TOOL_ERROR_RE.search(text)
+    ):
         return True
     return event.stop_reason.lower() in {"length", "error", "aborted"}
