@@ -64,6 +64,9 @@ class FixtureClassifierTests(unittest.TestCase):
     def test_tool_result_after_timeout_does_not_nudge_old_failure(self):
         self.run_fixture("pi-tool-result-after-timeout.jsonl", "pi", "active_generation", False)
 
+    def test_winerror_echo_fragments_do_not_clear_failure(self):
+        self.run_fixture("pi-winerror-echo-fragments.jsonl", "pi", "recoverable_provider_failure", True)
+
 
 if __name__ == "__main__":
     unittest.main()

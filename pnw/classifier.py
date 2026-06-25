@@ -9,6 +9,11 @@ from .events import Event, SessionRef
 
 RECOVERABLE_RE = re.compile(
     r"Proxy error:\s*(?:timed out|<urlopen error \[WinError 10060\]|.*WinError 10060.*)"
+    r"|WinError 10060"
+    r"|A connection attempt failed"
+    r"|properly respond after a period of time"
+    r"|connected host has failed to respond"
+    r"|Operation aborted"
     r"|terminated"
     r"|Request timed out"
     r"|Connection error"
@@ -52,7 +57,7 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
             events[-1],
         )
 
-    latest_user = _latest_event(events, "user")
+    latest_user = _latest_meaningful_event(events, "user")
     latest_assistant = _latest_event(events, "assistant")
     if latest_user and (
         not latest_assistant
@@ -185,11 +190,27 @@ def _latest_event(events: list[Event], role: str) -> Event | None:
     return None
 
 
+def _latest_meaningful_event(events: list[Event], role: str) -> Event | None:
+    for event in reversed(events):
+        if event.role != role:
+            continue
+        if role == "user" and _is_error_echo_user(event):
+            continue
+        return event
+    return None
+
+
+def _is_error_echo_user(event: Event) -> bool:
+    if event.role != "user":
+        return False
+    return bool(RECOVERABLE_RE.search(_event_text(event)) or CONTEXT_RE.search(_event_text(event)))
+
+
 def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | None:
     latest_failure_index: int | None = None
     for index, event in enumerate(events):
         text = _event_text(event)
-        if CONTEXT_RE.search(text) or event.stop_reason.lower() == "length" or RECOVERABLE_RE.search(text):
+        if _is_failure_event(event):
             latest_failure_index = index
 
     if latest_failure_index is None or latest_failure_index >= len(events) - 1:
@@ -205,6 +226,8 @@ def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | No
         )
 
     for event in reversed(later):
+        if event.role == "user" and _is_error_echo_user(event):
+            continue
         if event.role == "user" and event.text.strip().lower() not in {"continue", "steering: continue"}:
             return Decision(
                 "awaiting_assistant",
@@ -214,7 +237,7 @@ def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | No
             )
         if event.role in {"assistant", "toolResult", "tool_result"}:
             text = _event_text(event)
-            if not (CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text)):
+            if not _is_failure_event(event):
                 return Decision(
                     "active_generation",
                     False,
@@ -222,3 +245,10 @@ def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | No
                     event,
                 )
     return None
+
+
+def _is_failure_event(event: Event) -> bool:
+    text = _event_text(event)
+    if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text):
+        return True
+    return event.stop_reason.lower() in {"length", "error", "aborted"}

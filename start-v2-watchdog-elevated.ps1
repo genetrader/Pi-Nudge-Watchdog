@@ -7,8 +7,9 @@ param(
     [int]$PollSeconds = 10,
     [int]$QuietSeconds = 8,
     [int]$RecentNudgeHoldSeconds = 45,
-    [ValidateSet("console", "type", "paste")]
-    [string]$InputMode = "console",
+    [int]$ConfirmSessionWriteSeconds = 5,
+    [ValidateSet("console", "type", "paste", "auto")]
+    [string]$InputMode = "auto",
     [switch]$CatchUp,
     [switch]$Once,
     [switch]$DryRun
@@ -36,6 +37,7 @@ $watchdogArgs = @(
     "--target-pid", "$TargetPid",
     "--input-mode", $InputMode,
     "--recent-nudge-hold-seconds", "$RecentNudgeHoldSeconds",
+    "--confirm-session-write-seconds", "$ConfirmSessionWriteSeconds",
     "--state-path", $statePath,
     "--log-path", $logPath
 )
@@ -56,7 +58,8 @@ if (-not (Test-IsAdmin)) {
         "-InputMode", "`"$InputMode`"",
         "-PollSeconds", "$PollSeconds",
         "-QuietSeconds", "$QuietSeconds",
-        "-RecentNudgeHoldSeconds", "$RecentNudgeHoldSeconds"
+        "-RecentNudgeHoldSeconds", "$RecentNudgeHoldSeconds",
+        "-ConfirmSessionWriteSeconds", "$ConfirmSessionWriteSeconds"
     )
     if ($CatchUp) { $quoted += "-CatchUp" }
     if ($Once) { $quoted += "-Once" }

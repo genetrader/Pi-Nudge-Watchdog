@@ -50,13 +50,14 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--target-pid", type=int, default=0)
             p.add_argument("--window-title-regex", default=r"^(?:pi -|p|π|OMP|OpenClaude|OpenCode)")
             p.add_argument("--allow-generic-window", action="store_true")
-            p.add_argument("--input-mode", choices=["console", "type", "paste"], default="console")
+            p.add_argument("--input-mode", choices=["console", "type", "paste", "auto"], default="console")
             p.add_argument("--nudge-text", default="continue")
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
             p.add_argument("--log-path", type=Path)
             p.add_argument("--helper-path", type=Path, default=DEFAULT_HELPER)
             p.add_argument("--recent-nudge-hold-seconds", type=int, default=45)
+            p.add_argument("--confirm-session-write-seconds", type=int, default=5)
             p.add_argument("--catch-up", action="store_true")
         if name == "watch":
             p.add_argument("--poll-seconds", type=int, default=10)
@@ -217,26 +218,74 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
                     target_pid = int(target.summary)
                     if not once and getattr(args, "quiet_seconds", 0):
                         time.sleep(args.quiet_seconds)
-                    result = send_console_nudge(
-                        target_pid,
-                        args.nudge_text,
-                        args.helper_path,
+                    result = send_and_confirm(
+                        session=session,
+                        target_pid=target_pid,
+                        text=args.nudge_text,
+                        helper_path=args.helper_path,
                         dry_run=args.dry_run,
                         input_mode=args.input_mode,
+                        confirm_seconds=args.confirm_session_write_seconds,
                     )
                     row["action"] = result.summary
+                    state.last_nudge_at = time.time()
                     if result.ok and not args.dry_run:
-                        state.last_nudge_at = time.time()
                         state.handled.add(key)
             else:
                 row["action"] = "none"
-                if decision.event:
+                if decision.event and decision.kind in {
+                    "context_or_compaction_failure",
+                    "max_output_truncation",
+                    "recoverable_provider_failure",
+                    "queued_nudge_exists",
+                }:
                     state.handled.add(key)
             rows.append(row)
     state.save(args.state_path)
     emit(rows, args.json_output)
     write_log_rows(args.log_path, rows)
     return 0
+
+
+def send_and_confirm(
+    session,
+    target_pid: int,
+    text: str,
+    helper_path: Path,
+    dry_run: bool,
+    input_mode: str,
+    confirm_seconds: int,
+):
+    modes = ["console", "paste", "type"] if input_mode == "auto" else [input_mode]
+    attempts: list[str] = []
+    before = session.path.stat().st_mtime if session.path.exists() else session.last_write
+    for mode in modes:
+        result = send_console_nudge(
+            target_pid,
+            text,
+            helper_path,
+            dry_run=dry_run,
+            input_mode=mode,
+        )
+        if not result.ok or dry_run or confirm_seconds <= 0:
+            if result.ok:
+                return result
+            attempts.append(result.summary)
+            continue
+
+        deadline = time.time() + confirm_seconds
+        while time.time() < deadline:
+            try:
+                if session.path.stat().st_mtime > before:
+                    if attempts:
+                        return type(result)(True, f"{result.summary} Previous attempts: {' | '.join(attempts)}")
+                    return result
+            except OSError:
+                break
+            time.sleep(0.25)
+        attempts.append(f"{result.summary} but Pi session did not record new input within {confirm_seconds}s")
+
+    return type(result)(False, "Input delivery failed: " + " | ".join(attempts))
 
 
 def cmd_test_fixture(args: argparse.Namespace) -> int:

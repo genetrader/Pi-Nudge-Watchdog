@@ -105,6 +105,22 @@ def send_console_nudge(
         return NudgeResult(False, "No target PID supplied.")
     if dry_run:
         return NudgeResult(True, f"DRY RUN: would send {text!r} to PID {target_pid} via {input_mode}.")
+    if input_mode.lower() == "auto":
+        attempts: list[str] = []
+        for mode in ("console", "type", "paste"):
+            result = send_console_nudge(
+                target_pid,
+                text,
+                helper_path,
+                dry_run=False,
+                input_mode=mode,
+            )
+            if result.ok:
+                if attempts:
+                    return NudgeResult(True, f"{result.summary} Previous attempts: {' | '.join(attempts)}")
+                return result
+            attempts.append(result.summary)
+        return NudgeResult(False, "Auto input failed: " + " | ".join(attempts))
     if input_mode.lower() in {"type", "paste"}:
         return send_keys_nudge(target_pid, text, input_mode.lower())
     command = [
