@@ -56,7 +56,7 @@ class HarnessAdapter(ABC):
         max_profiles: int = 8,
     ) -> None:
         self.root = root or self.default_root()
-        self.profile = profile
+        self.profile = profile.strip()
         self.max_profiles = max_profiles
 
     @classmethod

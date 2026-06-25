@@ -99,11 +99,14 @@ def send_console_nudge(
     text: str,
     helper_path: Path,
     dry_run: bool = False,
+    input_mode: str = "console",
 ) -> NudgeResult:
     if target_pid <= 0:
         return NudgeResult(False, "No target PID supplied.")
     if dry_run:
-        return NudgeResult(True, f"DRY RUN: would send {text!r} to PID {target_pid}.")
+        return NudgeResult(True, f"DRY RUN: would send {text!r} to PID {target_pid} via {input_mode}.")
+    if input_mode.lower() in {"type", "paste"}:
+        return send_keys_nudge(target_pid, text, input_mode.lower())
     command = [
         "powershell.exe",
         "-NoProfile",
@@ -121,3 +124,58 @@ def send_console_nudge(
         detail = (proc.stderr or proc.stdout or "").strip()
         return NudgeResult(False, f"Console helper failed: {detail}")
     return NudgeResult(True, f"Sent {text!r} to PID {target_pid}.")
+
+
+def send_keys_nudge(target_pid: int, text: str, input_mode: str) -> NudgeResult:
+    escaped_text = text.replace("'", "''")
+    script = f"""
+$ErrorActionPreference = 'Stop'
+Add-Type -ErrorAction SilentlyContinue -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class NudgeWin32 {{
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}}
+"@
+$target = Get-Process -Id {target_pid} -ErrorAction Stop
+$null = [NudgeWin32]::ShowWindowAsync($target.MainWindowHandle, 9)
+Start-Sleep -Milliseconds 250
+$activated = [NudgeWin32]::SetForegroundWindow($target.MainWindowHandle)
+Start-Sleep -Milliseconds 250
+$ws = New-Object -ComObject WScript.Shell
+if (-not $activated) {{ $activated = $ws.AppActivate($target.MainWindowTitle) }}
+Start-Sleep -Milliseconds 250
+if (-not $activated) {{ $activated = $ws.AppActivate([int]{target_pid}) }}
+Start-Sleep -Milliseconds 250
+if (-not $activated) {{ throw 'AppActivate failed' }}
+"""
+    if input_mode == "paste":
+        script += f"""
+$old = $null
+$had = $false
+try {{ $old = Get-Clipboard -Raw -ErrorAction Stop; $had = $true }} catch {{ }}
+Set-Clipboard -Value '{escaped_text}'
+Start-Sleep -Milliseconds 100
+$ws.SendKeys('^v')
+Start-Sleep -Milliseconds 100
+$ws.SendKeys('{{ENTER}}')
+Start-Sleep -Milliseconds 100
+if ($had) {{ Set-Clipboard -Value $old }}
+"""
+    else:
+        sendkeys_text = text.replace("+", "{+}").replace("^", "{^}").replace("%", "{%}").replace("~", "{~}")
+        sendkeys_text = sendkeys_text.replace("(", "{(}").replace(")", "{)}")
+        script += f"$ws.SendKeys('{sendkeys_text}{{ENTER}}')\n"
+    proc = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return NudgeResult(False, f"SendKeys {input_mode} failed: {detail}")
+    return NudgeResult(True, f"Sent {text!r} to PID {target_pid} via {input_mode}.")

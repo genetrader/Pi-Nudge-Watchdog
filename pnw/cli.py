@@ -50,9 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--target-pid", type=int, default=0)
             p.add_argument("--window-title-regex", default=r"^(?:pi -|p|π|OMP|OpenClaude|OpenCode)")
             p.add_argument("--allow-generic-window", action="store_true")
+            p.add_argument("--input-mode", choices=["console", "type", "paste"], default="console")
             p.add_argument("--nudge-text", default="continue")
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
+            p.add_argument("--log-path", type=Path)
             p.add_argument("--helper-path", type=Path, default=DEFAULT_HELPER)
             p.add_argument("--recent-nudge-hold-seconds", type=int, default=45)
             p.add_argument("--catch-up", action="store_true")
@@ -90,6 +92,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def adapters_for(args: argparse.Namespace) -> list[HarnessAdapter]:
+    args.profile = args.profile.strip()
     roots = {
         name: value
         for name, value in {
@@ -219,6 +222,7 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
                         args.nudge_text,
                         args.helper_path,
                         dry_run=args.dry_run,
+                        input_mode=args.input_mode,
                     )
                     row["action"] = result.summary
                     if result.ok and not args.dry_run:
@@ -231,6 +235,7 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
             rows.append(row)
     state.save(args.state_path)
     emit(rows, args.json_output)
+    write_log_rows(args.log_path, rows)
     return 0
 
 
@@ -294,3 +299,16 @@ def emit(rows: list[dict[str, object]], json_output: bool) -> None:
             print(f"  session: {row['session']}")
         if row.get("action"):
             print(f"  action: {row['action']}")
+
+
+def write_log_rows(path: Path | None, rows: list[dict[str, object]]) -> None:
+    if not path:
+        return
+    import json
+    from datetime import datetime
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    with path.open("a", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps({"time": stamp, **row}, ensure_ascii=False) + "\n")

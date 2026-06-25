@@ -1,0 +1,4 @@
+{"type":"message","id":"a1","timestamp":"2026-06-24T20:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Proxy error: timed out"}],"stopReason":"stop"}}
+{"type":"message","id":"u2","parentId":"a1","timestamp":"2026-06-24T20:02:00Z","message":{"role":"user","content":[{"type":"text","text":"continue"}]}}
+{"type":"message","id":"a2","parentId":"u2","timestamp":"2026-06-24T20:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Recovered and completed the requested fix."}],"stopReason":"stop"}}
+{"type":"message","id":"u3","parentId":"a2","timestamp":"2026-06-24T20:04:00Z","message":{"role":"user","content":[{"type":"text","text":"now fix the build"}]}}

@@ -12,6 +12,7 @@ RECOVERABLE_RE = re.compile(
     r"|terminated"
     r"|Request timed out"
     r"|Connection error"
+    r"|Could not connect"
     r"|Retry failed after \d+ attempts"
     r"|Aborted after \d+ retry attempts"
     r"|api_error",
@@ -43,6 +44,40 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
     if not events:
         return Decision("unknown", False, "No events found.")
 
+    if _latest_assistant_completed(events):
+        return Decision(
+            "complete_or_idle",
+            False,
+            "Latest assistant response appears complete; ignoring older failures.",
+            events[-1],
+        )
+
+    latest_user = _latest_event(events, "user")
+    latest_assistant = _latest_event(events, "assistant")
+    if latest_user and (
+        not latest_assistant
+        or events.index(latest_user) > events.index(latest_assistant)
+    ):
+        if latest_user.text.strip().lower() not in {"continue", "steering: continue"}:
+            return Decision(
+                "awaiting_assistant",
+                False,
+                "Latest event is a new user turn; ignoring older failures.",
+                latest_user,
+            )
+
+    if _has_active_tool_wait(events):
+        return Decision(
+            "active_tool_wait",
+            False,
+            "Latest state has an outstanding tool call/result flow.",
+            events[-1],
+        )
+
+    cleared = _old_failure_cleared_by_later_progress(events)
+    if cleared:
+        return cleared
+
     latest_failure: Event | None = None
     for event in reversed(events):
         text = _event_text(event)
@@ -66,13 +101,6 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
             break
 
     if not latest_failure:
-        if _has_active_tool_wait(events):
-            return Decision(
-                "active_tool_wait",
-                False,
-                "Latest state has an outstanding tool call/result flow.",
-                events[-1],
-            )
         if now - session.last_write < 20:
             return Decision(
                 "active_generation",
@@ -131,3 +159,66 @@ def _has_active_tool_wait(events: list[Event]) -> bool:
         if event.tool_result_for and event.tool_result_for in open_calls:
             open_calls.remove(event.tool_result_for)
     return bool(open_calls)
+
+
+def _latest_assistant_completed(events: list[Event]) -> bool:
+    for event in reversed(events[-80:]):
+        if event.role == "user":
+            return False
+        if event.role == "assistant":
+            text = _event_text(event)
+            if CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text):
+                return False
+            if event.stop_reason.lower() in {"length", "error", "aborted"}:
+                return False
+            if event.text.strip():
+                return True
+        if event.role in {"toolResult", "tool_result"}:
+            continue
+    return False
+
+
+def _latest_event(events: list[Event], role: str) -> Event | None:
+    for event in reversed(events):
+        if event.role == role:
+            return event
+    return None
+
+
+def _old_failure_cleared_by_later_progress(events: list[Event]) -> Decision | None:
+    latest_failure_index: int | None = None
+    for index, event in enumerate(events):
+        text = _event_text(event)
+        if CONTEXT_RE.search(text) or event.stop_reason.lower() == "length" or RECOVERABLE_RE.search(text):
+            latest_failure_index = index
+
+    if latest_failure_index is None or latest_failure_index >= len(events) - 1:
+        return None
+
+    later = events[latest_failure_index + 1 :]
+    if _has_active_tool_wait(later):
+        return Decision(
+            "active_tool_wait",
+            False,
+            "Newer tool progress exists after the older failure.",
+            later[-1],
+        )
+
+    for event in reversed(later):
+        if event.role == "user" and event.text.strip().lower() not in {"continue", "steering: continue"}:
+            return Decision(
+                "awaiting_assistant",
+                False,
+                "Newer user turn exists after the older failure.",
+                event,
+            )
+        if event.role in {"assistant", "toolResult", "tool_result"}:
+            text = _event_text(event)
+            if not (CONTEXT_RE.search(text) or RECOVERABLE_RE.search(text)):
+                return Decision(
+                    "active_generation",
+                    False,
+                    "Newer model/tool progress exists after the older failure.",
+                    event,
+                )
+    return None
