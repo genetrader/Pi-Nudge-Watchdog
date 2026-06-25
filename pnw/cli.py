@@ -297,6 +297,12 @@ def send_and_confirm(
 def _nudge_text_for_decision(decision: Decision, configured_text: str) -> str:
     if configured_text != DEFAULT_NUDGE_TEXT:
         return configured_text
+    if decision.kind == "context_or_compaction_failure":
+        return (
+            f"{DEFAULT_NUDGE_TEXT} - recover from the context/output-token limit by reducing requested output, "
+            "summarizing or compacting the prior work, and continuing with a smaller response; "
+            f"{LOOP_GUARD_NUDGE}"
+        )
     if decision.kind == "malformed_tool_call_blocked":
         return (
             f"{DEFAULT_NUDGE_TEXT} - retry with one smaller valid supported tool call only; "

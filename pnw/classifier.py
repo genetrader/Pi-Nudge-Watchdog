@@ -43,6 +43,9 @@ HARNESS_BLOCK_RE = re.compile(
 CONTEXT_RE = re.compile(
     r"context overflow"
     r"|exceeds the available context size"
+    r"|maximum context length"
+    r"|requested \d+ output tokens"
+    r"|input_tokens"
     r"|session context is too large"
     r"|too large to continue safely"
     r"|compaction failed"
@@ -105,8 +108,8 @@ def classify(events: list[Event], session: SessionRef, now: float | None = None)
         if CONTEXT_RE.search(text):
             return Decision(
                 "context_or_compaction_failure",
-                False,
-                "Context or compaction failure detected; refusing blind continue.",
+                True,
+                "Context or compaction failure detected; sending targeted recovery nudge.",
                 event,
             )
         if NON_RECOVERABLE_TOOL_ERROR_RE.search(text):

@@ -46,8 +46,11 @@ class FixtureClassifierTests(unittest.TestCase):
     def test_pi_queued_loop_guard_nudge_blocks_duplicate(self):
         self.run_fixture("pi-queued-loop-guard-nudge.jsonl", "pi", "queued_nudge_exists", False)
 
-    def test_pi_compaction_failure_blocks_blind_continue(self):
-        self.run_fixture("pi-compaction-failure.jsonl", "pi", "context_or_compaction_failure", False)
+    def test_pi_compaction_failure_allows_targeted_recovery_nudge(self):
+        self.run_fixture("pi-compaction-failure.jsonl", "pi", "context_or_compaction_failure", True)
+
+    def test_pi_context_limit_400_allows_targeted_recovery_nudge(self):
+        self.run_fixture("pi-context-limit-400.jsonl", "pi", "context_or_compaction_failure", True)
 
     def test_python_syntax_error_does_not_nudge(self):
         self.run_fixture("pi-python-syntax-error.jsonl", "pi", "tool_or_code_error", False)
@@ -90,6 +93,13 @@ class FixtureClassifierTests(unittest.TestCase):
         text = _nudge_text_for_decision(decision, "continue")
         self.assertIn("stay on the current task", text)
         self.assertIn("same tool/error repeats", text)
+
+    def test_context_nudge_reduces_output_request(self):
+        decision = Decision("context_or_compaction_failure", True, "test")
+        text = _nudge_text_for_decision(decision, "continue")
+        self.assertIn("context/output-token limit", text)
+        self.assertIn("reducing requested output", text)
+        self.assertIn("summarizing or compacting", text)
 
     def test_custom_nudge_text_is_preserved(self):
         decision = Decision("malformed_tool_call_blocked", True, "test")

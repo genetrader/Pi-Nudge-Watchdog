@@ -7,7 +7,8 @@ to a harness-aware watchdog for long-running local/open-weight model sessions.
 
 Keep coding agents moving after recoverable local-model failures without
 nudging the wrong terminal, stacking `continue` messages, or blindly continuing
-when the real issue is context overflow or compaction failure.
+when the real issue is context overflow or compaction failure. Context failures
+use a targeted recovery nudge instead of a plain retry.
 
 The watchdog should eventually support:
 
@@ -110,7 +111,8 @@ The classifier should return one of these decisions:
 - `queued_nudge_exists`: do nothing.
 - `active_tool_wait`: do nothing; a tool call is outstanding or just returned.
 - `active_generation`: do nothing; the transcript is still moving.
-- `context_or_compaction_failure`: do not blindly continue.
+- `context_or_compaction_failure`: send a targeted recovery nudge that asks the
+  model to reduce requested output, summarize/compact, and continue smaller.
 - `wrong_target_or_unbound_window`: refuse to act.
 - `unknown`: log only unless configured otherwise.
 
@@ -119,14 +121,16 @@ The classifier should return one of these decisions:
 These rules prevent overzealous context behavior:
 
 1. Do not treat large context usage as a reason to nudge.
-2. Do not keep nudging when the last error is a compaction failure.
+2. Do not blindly retry when the last error is a compaction or context-limit
+   failure.
 3. Do not keep nudging when the harness says the session is too large to safely
-   continue.
+   continue; send one targeted recovery nudge and then rely on duplicate-nudge
+   guards.
 4. For `stopReason: length`, nudge is allowed because the model likely hit an
    output cap.
-5. For context overflow, send no input by default. In a future explicit mode,
-   the watchdog may send a safer message such as:
-   `Please summarize current progress briefly, then stop.`
+5. For context overflow, the default nudge asks the model to reduce requested
+   output, summarize or compact prior work, and continue with a smaller
+   response.
 6. Do not nudge while a tool call has no matching tool result unless it has been
    stale longer than a configured threshold.
 7. Do not nudge while the session file is actively changing.
@@ -268,7 +272,8 @@ The first v2 build should prove:
 - `dry-run --catch-up` explains exactly what would happen.
 - No duplicate nudge is sent when `continue` is already outstanding.
 - Generic or ambiguous windows are refused.
-- Context/compaction failures are logged but not blindly continued.
+- Context/compaction failures get a targeted recovery nudge instead of a blind
+  retry.
 
 ## Test Fixtures
 
