@@ -9,7 +9,7 @@ from pathlib import Path
 from .adapters import HarnessAdapter, make_adapters
 from .classifier import Decision, classify
 from .state import WatchState
-from .windows import list_console_windows, resolve_target_pid, send_console_nudge
+from .windows import confirm_continue_after_nudge_limit, list_console_windows, resolve_target_pid, send_console_nudge
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--helper-path", type=Path, default=DEFAULT_HELPER)
             p.add_argument("--recent-nudge-hold-seconds", type=int, default=45)
             p.add_argument("--confirm-session-write-seconds", type=int, default=5)
+            p.add_argument("--max-nudges-per-session", type=int, default=8)
+            p.add_argument("--no-alert-on-nudge-limit", action="store_true")
             p.add_argument("--catch-up", action="store_true")
         if name == "watch":
             p.add_argument("--poll-seconds", type=int, default=10)
@@ -200,15 +202,38 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
             events = adapter.latest_events(session, tail=args.tail)
             decision = classify(events, session, now=now)
             key = decision.event.stable_key if decision.event else str(session.path)
+            nudge_key = state.nudge_key(session.path, decision.kind)
             row = _decision_row(session, decision)
             if decision.allow_nudge:
                 if once and not args.catch_up and key not in state.handled:
                     row["action"] = "ignored_existing_failure_without_catch_up"
                     state.handled.add(key)
+                elif str(session.path) in state.suppressed_sessions:
+                    row["action"] = "suppressed_after_nudge_limit"
                 elif key in state.handled:
                     row["action"] = "already_handled"
                 elif now - state.last_nudge_at < args.recent_nudge_hold_seconds:
                     row["action"] = "recent_nudge_hold"
+                elif _nudge_limit_reached(state, nudge_key, args.max_nudges_per_session):
+                    if args.no_alert_on_nudge_limit or args.dry_run:
+                        row["action"] = f"nudge_limit_reached_{args.max_nudges_per_session}"
+                    else:
+                        prompt = (
+                            f"The model/session appears unreachable or stuck after "
+                            f"{state.nudge_counts.get(nudge_key, 0)} automatic nudges.\n\n"
+                            f"Profile: {session.profile}\n"
+                            f"Decision: {decision.kind}\n"
+                            f"Last reason: {decision.reason}\n\n"
+                            "Keep trying automatic nudges?"
+                        )
+                        if confirm_continue_after_nudge_limit(prompt):
+                            state.nudge_counts[nudge_key] = 0
+                            row["action"] = "nudge_limit_user_chose_keep_trying"
+                        else:
+                            state.suppressed_sessions.add(str(session.path))
+                            row["action"] = "nudge_limit_user_chose_stop"
+                            rows.append(row)
+                            continue
                 else:
                     target = resolve_target_pid(
                         session.profile,
@@ -236,6 +261,7 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
                     state.last_nudge_at = time.time()
                     if not args.dry_run:
                         state.handled.add(key)
+                        state.nudge_counts[nudge_key] = state.nudge_counts.get(nudge_key, 0) + 1
             else:
                 row["action"] = "none"
                 if decision.event and decision.kind in {
@@ -251,6 +277,10 @@ def evaluate_and_maybe_nudge(args: argparse.Namespace, once: bool) -> int:
     emit(rows, args.json_output)
     write_log_rows(args.log_path, rows)
     return 0
+
+
+def _nudge_limit_reached(state: WatchState, nudge_key: str, limit: int) -> bool:
+    return limit > 0 and state.nudge_counts.get(nudge_key, 0) >= limit
 
 
 def send_and_confirm(

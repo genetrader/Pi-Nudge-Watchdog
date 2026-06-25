@@ -18,6 +18,32 @@ class WindowCandidate:
     process_name: str
 
 
+def confirm_continue_after_nudge_limit(message: str) -> bool:
+    escaped = message.replace("'", "''")
+    script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$result = [System.Windows.Forms.MessageBox]::Show(
+    '{escaped}',
+    'Pi-Nudge-Watchdog: model may be unreachable',
+    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+    [System.Windows.Forms.MessageBoxIcon]::Warning,
+    [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+)
+if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {{ exit 0 }}
+exit 1
+"""
+    try:
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
 def list_console_windows(
     window_title_regex: str = "",
     timeout_seconds: int = 25,
