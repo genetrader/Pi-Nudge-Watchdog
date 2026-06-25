@@ -1,0 +1,2 @@
+{"type":"message","id":"u1","timestamp":"2026-06-24T20:00:00Z","message":{"role":"user","content":[{"type":"text","text":"review the codebase"}],"provider":"omp-local-example","model":"MiniMax-M3"}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-06-24T20:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Error: terminated\n\nError: Request timed out."}],"provider":"omp-local-example","model":"MiniMax-M3","stopReason":"error"}}

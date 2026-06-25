@@ -1,0 +1,1 @@
+{"type":"message","id":"a1","timestamp":"2026-06-24T20:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Auto-compaction failed: Turn prefix summarization failed: Request timed out."}],"stopReason":"error"}}

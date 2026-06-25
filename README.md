@@ -83,7 +83,7 @@ That writes directly to the Pi console input buffer without focusing the Pi wind
 For reliable multi-model use, launch Pi windows with unique titles that include the launcher profile name, for example:
 
 ```bat
-title pi - qwen-local-192-168-1-127-8000-deepseek-v4-flash
+title pi - your-local-model-profile
 ```
 
 When the watchdog is monitoring multiple profiles, it refuses to nudge a generic Pi window unless the window title matches the failed session profile. This avoids sending `continue` to the wrong local-model CLI.
@@ -133,6 +133,95 @@ Those modes focus the Pi window, so use them only if console injection does not 
 - The watchdog can monitor one profile with `-ProfileName` or the latest sessions across recent profiles with `-MaxProfiles`.
 - The watchdog is single-flight by default: it will not queue a second nudge while one is already outstanding, and it persists a short recent-nudge hold file under `logs/` so restarts do not immediately stack another nudge.
 - This does not detect whether the model is doing good work. It only keeps the session moving after common transient failures.
+
+## V2 Harness-Aware Watchdog
+
+The repo now includes an experimental v2 Python core beside the original
+PowerShell script. The original script remains the stable Pi-only path.
+
+V2 adds:
+
+- Pi, OMP, and OpenClaude session adapters.
+- Conservative OpenCode discovery, with wrapper support planned if no transcript
+  is exposed.
+- A generic log adapter for harnesses that only expose terminal output.
+- A normalized event model instead of Pi-only JSONL assumptions.
+- Context-aware classification so compaction/context failures are not blindly
+  nudged.
+- `doctor`, `status`, `list-sessions`, `once`, `watch`, and fixture test modes.
+- Exact target binding. V2 refuses generic console windows unless you supply an
+  explicit `--target-pid` or opt into generic targeting.
+
+Read the design notes:
+
+```powershell
+Get-Content .\V2_DESIGN.md
+```
+
+Inspect what v2 can see:
+
+```powershell
+python .\watchdog.py doctor
+python .\watchdog.py list-sessions --harness all
+python .\watchdog.py status --harness all
+```
+
+For OpenCode installs that do not expose transcript files, start OpenCode through
+the wrapper so v2 has a transcript to watch:
+
+```powershell
+.\opencode-nudge-wrapper.ps1 -ProfileName opencode-local
+```
+
+Then watch the wrapper transcript:
+
+```powershell
+python .\watchdog.py watch `
+  --harness generic `
+  --profile opencode-local `
+  --target-pid 12345
+```
+
+Dry-run a current failure without typing:
+
+```powershell
+python .\watchdog.py once `
+  --harness pi `
+  --profile "your-pi-profile-name" `
+  --catch-up `
+  --dry-run `
+  --target-pid 12345
+```
+
+Point any adapter at a custom root:
+
+```powershell
+python .\watchdog.py status --harness generic --generic-root C:\path\to\logs
+```
+
+Run the v2 watcher for a bound target:
+
+```powershell
+python .\watchdog.py watch `
+  --harness pi `
+  --profile "your-pi-profile-name" `
+  --target-pid 12345
+```
+
+Run the fixture tests:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+V2 intentionally treats these differently:
+
+- `Request timed out`, `Connection error`, `terminated`, proxy WinError 10060:
+  recoverable provider failures.
+- `stopReason: length`: safe to continue because the model hit output length.
+- queued `continue`: do not stack another nudge.
+- context overflow, session too large, compaction failure, turn prefix
+  summarization failure: log/refuse by default.
 
 ## License
 

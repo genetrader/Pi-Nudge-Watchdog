@@ -1,0 +1,2 @@
+{"type":"message","id":"u1","timestamp":"2026-06-24T20:00:00Z","message":{"role":"user","content":[{"type":"text","text":"continue working"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-06-24T20:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Proxy error: timed out"}],"provider":"local-profile-example","model":"local-open-weight","stopReason":"error"}}

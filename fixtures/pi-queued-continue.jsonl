@@ -1,0 +1,2 @@
+{"type":"message","id":"a1","timestamp":"2026-06-24T20:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"Request timed out."}],"stopReason":"error"}}
+{"type":"message","id":"u2","parentId":"a1","timestamp":"2026-06-24T20:01:10Z","message":{"role":"user","content":[{"type":"text","text":"continue"}]}}
